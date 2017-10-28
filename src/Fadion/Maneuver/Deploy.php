@@ -1,7 +1,7 @@
 <?php namespace Fadion\Maneuver;
 
-use Banago\Bridge\Bridge;
 use Exception;
+use League\Flysystem\Filesystem;
 
 /**
  * Class Deploy
@@ -16,9 +16,9 @@ class Deploy {
     protected $git;
 
     /**
-     * @var \Banago\Bridge\Bridge
+     * @var Filesystem
      */
-    protected $bridge;
+    protected $filesystem;
 
     /**
      * @var string Server credentials
@@ -59,13 +59,13 @@ class Deploy {
      * Constructor
      *
      * @param \Fadion\Maneuver\Git $git
-     * @param \Banago\Bridge\Bridge $bridge
+     * @param \League\Flysystem\Filesystem $filesystem
      * @param array $server
      */
-    public function __construct(Git $git, Bridge $bridge, $server)
+    public function __construct(Git $git, Filesystem $filesystem, $server)
     {
         $this->git = $git;
-        $this->bridge = $bridge;
+        $this->filesystem = $filesystem;
         $this->ignoredFiles = $git->getIgnored();
         $this->server = $server;
     }
@@ -88,8 +88,8 @@ class Deploy {
             $this->revisionFile = $this->isSubmodule . '/' . $this->revisionFile;
         }
 
-        if ($this->bridge->exists($this->revisionFile)) {
-            $remoteRevision = $this->bridge->get($this->revisionFile);
+        if ($this->filesystem->has($this->revisionFile)) {
+            $remoteRevision = $this->filesystem->read($this->revisionFile);
 
             $message = "\r\n» Taking it from '" . substr($remoteRevision, 0, 7) . "'";
         } else {
@@ -193,59 +193,58 @@ class Deploy {
             $file = $this->isSubmodule.'/'.$file;
         }
 
-        $dir = explode('/', dirname($file));
-        $path = '';
-        $pathThatExists = null;
-        $output = array();
+        try {
+            $dir = explode('/', dirname($file));
+            $path = '';
+            $output = array();
 
-        // Skip basedir or parent.
-        if ($dir[0] != '.' and $dir[0] != '..') {
-            // Iterate through directory pieces.
-            for ($i = 0, $count = count($dir); $i < $count; $i++) {
-                $path .= $dir[$i].'/';
-
-                if (!isset($pathThatExists[$path])) {
-                    $origin = $this->bridge->pwd();
+            // Skip basedir or parent.
+            if ($dir[0] != '.' and $dir[0] != '..') {
+                // Iterate through directory pieces.
+                for ($i = 0, $count = count($dir); $i < $count; $i++) {
+                    $path .= $dir[$i].'/';
 
                     // The directory doesn't exist.
-                    if (! $this->bridge->exists($path)) {
+                    if (! $this->filesystem->has($path)) {
                         // Attempt to create the directory.
-                        $this->bridge->mkdir($path);
+                        $this->filesystem->createDir($path);
                         $output[] = "Created directoy '$path'.'";
                     }
-                    // The directory exists.
-                    else {
-                        $this->bridge->cd($path);
-                    }
-
-                    $pathThatExists[$path] = true;
-                    $this->bridge->cd($origin);
                 }
             }
-        }
 
-        $uploaded = false;
-        $attempts = 1;
+            $uploaded = false;
+            $attempts = 1;
 
-        // Loop until $uploaded becomes a valid
-        // resource.
-        while (!$uploaded) {
-            // Attempt to upload the file 10 times
-            // and exit if it fails.
-            if ($attempts == 10) {
-                $output[] = "Tried to upload $file 10 times, and failed 10 times. Something is wrong, so I'm going to stop executing now.";
-                return $output;
+            // Loop until $uploaded becomes a valid
+            // resource.
+            while (!$uploaded) {
+                // Attempt to upload the file 10 times
+                // and exit if it fails.
+                if ($attempts == 10) {
+                    $output[] = "Tried to upload $file 10 times, and failed 10 times. Something is wrong, so I'm going to stop executing now.";
+                    return $output;
+                }
+
+                $data = file_get_contents($file);
+                if ($this->filesystem->has($file)) {
+                    $uploaded = $this->filesystem->update($file, $data);
+                } else {
+                    $uploaded = $this->filesystem->put($file, $data);
+                }
+
+                if (!$uploaded) {
+                    $attempts++;
+                }
             }
 
-            $data = file_get_contents($file);
-            $uploaded = $this->bridge->put($data, $file);
+            $output[] = "√ \033[0;37m{$file}\033[0m \033[0;32muploaded\033[0m";
 
-            if (!$uploaded) {
-                $attempts++;
-            }
+        } catch (\Exception $e) {
+            $output[] = "⊘ \033[0;37mFailed\033[0m";
+        } catch (\ErrorException $e) {
+            $output[] = "⊘ \033[0;37mFailed\033[0m";
         }
-
-        $output[] = "√ \033[0;37m{$file}\033[0m \033[0;32muploaded\033[0m";
 
         return $output;
     }
@@ -258,7 +257,7 @@ class Deploy {
      */
     public function delete($file)
     {
-        $this->bridge->rm($file);
+        $this->filesystem->delete($file);
 
         return "× \033[0;37m{$file}\033[0m \033[0;31mremoved\033[0m";
     }
@@ -278,7 +277,7 @@ class Deploy {
         }
 
         try {
-            $this->bridge->put($localRevision, $this->revisionFile);
+            $this->filesystem->put($this->revisionFile, $localRevision);
         }
         catch (Exception $e) {
             throw new Exception("Could not update the revision file on server: {$e->getMessage()}");

@@ -35,12 +35,26 @@ class ManeuverServiceProvider extends ServiceProvider
 	 */
 	public function register()
 	{
-		$this->commands([
-			Commands\DeployCommand::class,
-			Commands\ListCommand::class,
-			Commands\RollbackCommand::class,
-			Commands\SyncCommand::class,
-		]);
+        $this->app->singleton('artisan.maneuver.deploy', function($app) {
+            return new DeployCommand;
+        });
+
+        $this->app->singleton('artisan.maneuver.list', function($app) {
+            return new ListCommand;
+        });
+
+        $this->app->singleton('artisan.maneuver.rollback', function($app) {
+            return new RollbackCommand;
+        });
+
+        $this->app->singleton('artisan.maneuver.sync', function($app) {
+            return new SyncCommand;
+        });
+
+        $this->commands('artisan.maneuver.deploy');
+        $this->commands('artisan.maneuver.list');
+        $this->commands('artisan.maneuver.rollback');
+        $this->commands('artisan.maneuver.sync');
 	}
 
 	/**
